@@ -1,0 +1,4 @@
+interface:
+  display_name: "FDE 招聘筛选"
+  short_description: "按已对齐门槛视觉复核简历、证据化评分，并准备后端交付核验问题"
+  default_prompt: "使用 $fde-screen 审阅这些候选人简历，区分通过、待核验与不通过，并给出证据及必要的补证问题。"
