@@ -3,7 +3,8 @@ Change Log: 2026-10-07 Add offline ranking boundary and identity regression test
 """
 import csv
 import unittest
-from school_lookup import REFERENCE, lookup, rank_bounds
+from unittest.mock import patch
+from school_lookup import REFERENCE, lookup, lookup_either, rank_bounds
 
 
 class SchoolLookupTests(unittest.TestCase):
@@ -46,16 +47,43 @@ class SchoolLookupTests(unittest.TestCase):
         self.assertEqual(lookup("overseas", "Washington University in St. Louis")["match"]["rank"], "176")
 
     def test_qs_routing(self):
-        self.assertEqual(lookup("overseas", "Tsinghua University")["ranking_status"], "wrong_scope")
-        self.assertEqual(lookup("overseas", "The University of Hong Kong")["ranking_status"], "scope_review")
-        self.assertEqual(lookup("overseas", "National Taiwan University (NTU)")["ranking_status"], "scope_review")
+        for name in ["Tsinghua University", "The University of Hong Kong", "National Taiwan University (NTU)"]:
+            self.assertEqual(lookup_either(name)["ranking_status"], "within_top150")
         self.assertEqual(lookup("overseas", "牛津大学")["ranking_status"], "unmatched")
+
+    def test_either_and_entity(self):
+        for name in ["清华大学", "浙江农林大学", "University of Bath"]:
+            self.assertEqual(lookup_either(name)["ranking_status"], "within_top150")
+        for name in ["宁波诺丁汉大学", "University of Nottingham Ningbo China", "厦门大学嘉庚学院", "南通大学", ""]:
+            self.assertEqual(lookup_either(name)["g1"], "待核验")
+            self.assertNotEqual(lookup_either(name)["ranking_status"], "within_top150")
+        self.assertEqual(lookup("domestic", "南通大学")["g1"], "待核验")
+        self.assertEqual(lookup_either("University of Nottingham")["ranking_status"], "within_top150")
 
     def test_rank_formats(self):
         self.assertEqual(rank_bounds("=150"), (150, 150))
         self.assertEqual(rank_bounds("151–200"), (151, 200))
         self.assertGreater(rank_bounds("500+")[0], 150)
         self.assertEqual(rank_bounds("N/A"), (None, None))
+
+    def test_or_truth_table(self):
+        cases = [
+            ("outside_top150", "within_top150", "within_top150"),
+            ("within_top150", "outside_top150", "within_top150"),
+            ("outside_top150", "outside_top150", "outside_both_top150"),
+            ("outside_top150", "unmatched", "pending_verification"),
+            ("unmatched", "unmatched", "pending_verification"),
+            ("data_unavailable", "within_top150", "within_top150"),
+        ]
+        for cn, qs, expected in cases:
+            with self.subTest(cn=cn, qs=qs):
+                def fake(scope, school):
+                    return {"ranking_status": cn if scope == "domestic" else qs}
+                with patch("school_lookup.lookup", side_effect=fake):
+                    result = lookup_either("Test institution")
+                self.assertEqual(result["ranking_status"], expected)
+                if expected != "outside_both_top150":
+                    self.assertEqual(result["g1"], "待核验")
 
 
 if __name__ == "__main__":

@@ -10,10 +10,12 @@ ranking_year: 2025
 
 用户于2026-10-07要求长期使用2025版，不随年份自动更新。前150包含第150名及其并列项。只核院校排名资格，不能证明候选人学历真实或替代其他G1条件。
 
+两榜取“或”，不按地域分流：中国大陆、港澳台、海外的实际初始本科就读学校实体，任一榜前150即可满足排名项。只认实际就读实体，不继承母体、合作方或仅授予学位一方的排名。合作办学本身不自动fail，但须查自身实体；真实多校培养或校区归属不清先补证。
+
 | 适用范围 | 离线文件 | 榜单及覆盖 |
 |---|---|---|
-| 国内 | [schools-2025-cn.csv](schools-2025-cn.csv) | 2025软科中国大学排名主榜，完整589所，前150共150所 |
-| 海外 | [schools-2025-qs.csv](schools-2025-qs.csv) | QS世界大学综合排名2025，前200条；前150含并列共151所，非全球完整榜 |
+| 软科分支 | [schools-2025-cn.csv](schools-2025-cn.csv) | 2025软科中国大学排名主榜，完整589所，前150共150所 |
+| QS分支 | [schools-2025-qs.csv](schools-2025-qs.csv) | QS世界大学综合排名2025，前200条；前150含并列共151所，非全球完整榜 |
 
 CSV是唯一数据源，本说明不重复完整院校清单。可用Excel/Numbers打开，也可直接阅读；`rank`保留官方原始名次，`name`保留完整实体名。不要自行把独立学院截为母体校名。
 
@@ -35,7 +37,7 @@ CSV是唯一数据源，本说明不重复完整院校清单。可用Excel/Numbe
 - 数据来自[马来西亚理工大学官网托管的QS原署名PDF](https://sps.utm.my/wp-content/uploads/2024/09/2025-QS-World-University-Rankings-2.2-For-qs.com_.pdf)，不是QS域名直接下载。使用2025列，不使用相邻2024列；200条序号连续，保留并列，source_id留空而不冒用行号。
 - 按[QS官方更正记录](https://www.topuniversities.com/rankings-release-summaries/world-university-rankings-2025-release-summary)将Washington University in St. Louis修正为176。
 - 边界：149 King Abdulaziz University (KAU)；150 Indian Institute of Technology Delhi (IITD)；150 University of Bath；152 Michigan State University及Nagoya University。两所150名已与各自QS官网历史排名核对。
-- 前150含并列共151所，另49条超过150；这是全球榜子集，包含中国大陆和港澳台实体，不能据此改变国内/海外路由。
+- 前150含并列共151所，另49条超过150；这是全球榜子集，包含中国大陆和港澳台实体，各地学校均可凭自身排名达标。
 - 未逐校对照全部151个QS院校历史页。中文译名不自动映射；未匹配或未覆盖保持待核验，不得进入通过名单。
 - 原始PDF SHA-256：`273540e15ecb64591671b15737057bd460e3c4f8c0a0a7b2076bfb3449d836d6`；CSV SHA-256：`1da69f0adbd32100390ec58ad30ccc525f28f970c84fca6b14feab050029158c`。
 
@@ -44,21 +46,24 @@ CSV是唯一数据源，本说明不重复完整院校清单。可用Excel/Numbe
 在Skill目录执行（脚本只使用Python标准库，不联网）：
 
 ```bash
-python3 scripts/school_lookup.py --scope domestic "浙江农林大学" "南通大学" "厦门大学嘉庚学院"
-python3 scripts/school_lookup.py --scope overseas "University of Oxford"
+python3 scripts/school_lookup.py --scope either "浙江农林大学" "南通大学" "厦门大学嘉庚学院"
+python3 scripts/school_lookup.py "University of Oxford" "The University of Hong Kong"
 ```
 
 匹配仅做Unicode全半角、首尾/连续空格和英文大小写归一化；不做子串、模糊搜索、简称猜测或自动中文翻译。未唯一命中时，应核对原始校名、历史更名和实际就读实体，不得自动删掉“学院/校区”等词重试放行。普通校区未知只待核验，不自动排除。
 
+默认`either`查双榜，可使用同一CSV记录的官方中英文名跨表匹配；其他译名须核验。兼容的`domestic`/`overseas`参数只代表软科/QS单榜查询，不再限制学校地域，也不能用于直接判整体fail。双榜未达标的完整证据须人工核实；任一榜未匹配或缺失不等于确认不达标。
+
 | 查询结果 | 后续处理 |
 |---|---|
-| `within_top150` | 只说明排名符合；核初始高等教育、就读实体及归属后才可判G1通过 |
-| `outside_top150` | 确认初始本科实体匹配后，G1确认不符；后续硕博和经验不补偿 |
+| `within_top150` | 任一榜排名符合；核初始高等教育及实际就读实体等条件后才可判G1通过 |
+| `outside_top150` | 仅单榜不符合，必须再核另一榜，不能直接fail |
+| `outside_both_top150` | 两榜均明确超150；确认实际初始本科实体匹配后，排名项不通过 |
+| `pending_verification` | 无达标证据且至少一榜未能确认，先补证，不评分 |
 | `unmatched` / `ambiguous` | 不进通过名单；区分未覆盖、中文译名、简称、更名或校区问题，向使用者补证 |
-| `wrong_scope` / `scope_review` | 国内必须用国内主榜；港澳台及归属不明按G1先请使用者确认 |
 | `data_unavailable` / `rank_unresolved` | 数据缺失或名次不明，待核验，不换榜、不猜测 |
 
-榜单未覆盖不等于150名以后。例如财经、医药等类别院校可能不在软科主榜，不能拿类别榜名次混入本规则，也不能仅凭985/211身份放行。需要使用者明确例外或补充适用规则；例外独立记录，不改写为原规则通过。
+榜单未覆盖不等于150名以后。例如财经、医药等类别院校可能不在软科主榜，应继续核QS，不拿类别榜名次混入本规则，也不凭985/211身份放行。两榜均未能核实则待核验；用户明确的例外独立记录，不改写为原规则通过。
 
 ## HR交付检查
 
@@ -78,5 +83,6 @@ python3 -m unittest discover -s scripts -p 'test_school_lookup.py' -v
 
 | 日期 | 变更 |
 |---|---|
+| 2026-10-07 | 对齐1.11.0：只认实际就读实体，两榜取或，取消国别路由，单榜超150不直接fail；榜单数据未变。 |
 | 2026-10-07 | 对齐1.8.0六项硬门槛及缺项完全不评分规则，榜单数据未变。 |
 | 2026-10-07 | 固化2025口径；新增国内589所主榜及QS前200条离线表，保留并列及来源限制，加入精确匹配和HR分流规则。 |

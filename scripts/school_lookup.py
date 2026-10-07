@@ -3,7 +3,7 @@
 
 Owner: APU Workshop
 Updated: 2026-10-07
-Change Log: 2026-10-07 Initial exact-match lookup, fail-closed routing.
+Change Log: 2026-10-07 Add either-ranking lookup; actual study entity only.
 """
 import argparse
 import csv
@@ -36,7 +36,7 @@ def lookup(scope, school):
     path = REFERENCE / ("schools-2025-cn.csv" if scope == "domestic" else "schools-2025-qs.csv")
     base = {"input": school, "scope": scope, "ranking_year": 2025,
             "source_file": str(path), "g1": "待核验", "ranking_status": "unmatched",
-            "note": "仅学校排名查询；G1仍需确认初始高等教育路径、就读实体及榜单归属。"}
+            "note": "仅单榜证据；G1仍需确认初始路径及实际就读实体；单榜超150不能判整体fail。"}
     if not normalize(school):
         base["reason"] = "学校名为空；不得通过。"
         return base
@@ -53,33 +53,53 @@ def lookup(scope, school):
         return base
     row = matches[0]
     base["match"] = row
-    if scope == "overseas":
-        country = normalize(row.get("country", ""))
-        if country in {"china", "mainland china", "china (mainland)", "中国", "中国大陆"}:
-            base.update(ranking_status="wrong_scope", reason="国内院校须查国内主榜，不能凭QS绕过国内门槛。")
-            return base
-        if not country or any(x in country for x in ["hong kong", "macao", "macau", "taiwan", "香港", "澳门", "台湾"]):
-            base.update(ranking_status="scope_review", reason="港澳台或归属不明；按现行G1先请使用者确认，不自动归入海外。")
-            return base
     low, high = rank_bounds(row["rank"])
     if low is None:
         base.update(ranking_status="rank_unresolved", reason="无法解析名次；不得通过。")
     elif high <= 150:
         base.update(ranking_status="within_top150", reason="2025榜单名次符合；不等于G1已通过，需核初始路径及实际就读实体。")
     elif low > 150:
-        base.update(ranking_status="outside_top150", g1="不通过（确认初始本科实体匹配时）",
-                    reason="2025指定榜单明确超过150；列入确认不符队列，不用工作经验或后续学历补偿。")
+        base.update(ranking_status="outside_top150",
+                    reason="本榜超过150；须检查另一榜，不能据此单独判G1不通过。")
     else:
         base.update(ranking_status="rank_unresolved", reason="排名区间跨越150边界；待核验，不自动通过。")
     return base
 
 
+def lookup_either(school):
+    # 只用表内同一条学校记录提供的官方中英文名跨表查询，不猜译名。
+    names = {school}
+    for scope in ("domestic", "overseas"):
+        match = lookup(scope, school).get("match", {})
+        names.update(match[k] for k in ("name", "name_en") if match.get(k))
+    evidence = []
+    for scope in ("domestic", "overseas"):
+        results = [lookup(scope, name) for name in sorted(names)]
+        matched = [r for r in results if "match" in r]
+        if len({r["match"]["name"] for r in matched}) > 1 or any(r["ranking_status"] == "ambiguous" for r in results):
+            result = lookup(scope, school)
+            result.update(ranking_status="ambiguous", reason="存在同名或跨表实体歧义，须人工核验。")
+        else:
+            result = matched[0] if matched else results[0]
+        evidence.append(result)
+    statuses = {r["ranking_status"] for r in evidence}
+    status = ("ambiguous" if "ambiguous" in statuses else
+              "within_top150" if "within_top150" in statuses else
+              "outside_both_top150" if statuses == {"outside_top150"} else "pending_verification")
+    return {"input": school, "ranking_year": 2025, "ranking_status": status,
+            "g1": "不通过（确认实际初始本科实体匹配时）" if status == "outside_both_top150" else "待核验",
+            "evidence": evidence,
+            "note": "两榜任一前150仅满足排名项；只认实际就读实体，不继承合作方/授予方排名。未匹配不等于已证实两榜均不达标。"}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scope", choices=["domestic", "overseas"], required=True)
+    parser.add_argument("--scope", choices=["either", "domestic", "overseas"], default="either",
+                        help="默认either查双榜；domestic/overseas仅保留单榜证据查询，不作地域限制")
     parser.add_argument("schools", nargs="+", help="学校完整名称；多个校名分别加引号")
     args = parser.parse_args()
-    print(json.dumps([lookup(args.scope, school) for school in args.schools], ensure_ascii=False, indent=2))
+    print(json.dumps([lookup_either(school) if args.scope == "either" else lookup(args.scope, school)
+                      for school in args.schools], ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
