@@ -2,8 +2,8 @@
 """2025学校榜单离线精确查询；只返回院校排名证据，不作录用决定。
 
 Owner: APU Workshop
-Updated: 2026-10-07
-Change Log: 2026-10-07 Add either-ranking lookup; actual study entity only.
+Updated: 2026-10-11
+Change Log: 2026-10-11 Apply CN100/QS150 thresholds and neutral status names.
 """
 import argparse
 import csv
@@ -34,9 +34,10 @@ def rank_bounds(rank):
 
 def lookup(scope, school):
     path = REFERENCE / ("schools-2025-cn.csv" if scope == "domestic" else "schools-2025-qs.csv")
-    base = {"input": school, "scope": scope, "ranking_year": 2025,
+    cutoff = 100 if scope == "domestic" else 150
+    base = {"cutoff": cutoff, "input": school, "scope": scope, "ranking_year": 2025,
             "source_file": str(path), "g1": "待核验", "ranking_status": "unmatched",
-            "note": "仅单榜证据；G1仍需确认初始路径及实际就读实体；单榜超150不能判整体fail。"}
+            "note": "仅单榜证据；单榜超门槛不能判整体fail；还需检查其余就读学校。"}
     if not normalize(school):
         base["reason"] = "学校名为空；不得通过。"
         return base
@@ -56,13 +57,13 @@ def lookup(scope, school):
     low, high = rank_bounds(row["rank"])
     if low is None:
         base.update(ranking_status="rank_unresolved", reason="无法解析名次；不得通过。")
-    elif high <= 150:
-        base.update(ranking_status="within_top150", reason="2025榜单名次符合；不等于G1已通过，需核初始路径及实际就读实体。")
-    elif low > 150:
-        base.update(ranking_status="outside_top150",
-                    reason="本榜超过150；须检查另一榜，不能据此单独判G1不通过。")
+    elif high <= cutoff:
+        base.update(ranking_status="within_cutoff", reason="2025本榜名次符合；不等于所有就读学校及本科条件均通过。")
+    elif low > cutoff:
+        base.update(ranking_status="outside_cutoff",
+                    reason="本榜超过门槛；须检查另一榜，不能据此单独判G1不通过。")
     else:
-        base.update(ranking_status="rank_unresolved", reason="排名区间跨越150边界；待核验，不自动通过。")
+        base.update(ranking_status="rank_unresolved", reason="排名区间跨越本榜门槛；待核验，不自动通过。")
     return base
 
 
@@ -84,12 +85,12 @@ def lookup_either(school):
         evidence.append(result)
     statuses = {r["ranking_status"] for r in evidence}
     status = ("ambiguous" if "ambiguous" in statuses else
-              "within_top150" if "within_top150" in statuses else
-              "outside_both_top150" if statuses == {"outside_top150"} else "pending_verification")
+              "within_cutoff" if "within_cutoff" in statuses else
+              "outside_both_cutoffs" if statuses == {"outside_cutoff"} else "pending_verification")
     return {"input": school, "ranking_year": 2025, "ranking_status": status,
-            "g1": "不通过（确认实际初始本科实体匹配时）" if status == "outside_both_top150" else "待核验",
+            "g1": "不通过（确认实际就读实体匹配时）" if status == "outside_both_cutoffs" else "待核验",
             "evidence": evidence,
-            "note": "两榜任一前150仅满足排名项；只认实际就读实体，不继承合作方/授予方排名。未匹配不等于已证实两榜均不达标。"}
+            "note": "软科前100或QS前150仅满足该校排名项；逐校核验全部教育经历，只认实际就读实体，不继承合作方/授予方排名。未匹配不等于已证实两榜均不达标。"}
 
 
 def main():
