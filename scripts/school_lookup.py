@@ -58,7 +58,7 @@ def lookup(scope, school):
     if low is None:
         base.update(ranking_status="rank_unresolved", reason="无法解析名次；不得通过。")
     elif high <= cutoff:
-        base.update(ranking_status="within_cutoff", reason="2025本榜名次符合；不等于所有就读学校及本科条件均通过。")
+        base.update(ranking_status="within_cutoff", reason="2025本榜名次符合；不等于所有已列学历学校及无专科条件均通过。")
     elif low > cutoff:
         base.update(ranking_status="outside_cutoff",
                     reason="本榜超过门槛；须检查另一榜，不能据此单独判G1不通过。")
@@ -90,7 +90,7 @@ def lookup_either(school):
     return {"input": school, "ranking_year": 2025, "ranking_status": status,
             "g1": "不通过（确认实际就读实体匹配时）" if status == "outside_both_cutoffs" else "待核验",
             "evidence": evidence,
-            "note": "软科前100或QS前150仅满足该校排名项；逐校核验全部教育经历，只认实际就读实体，不继承合作方/授予方排名。未匹配不等于已证实两榜均不达标。"}
+            "note": "软科前100或QS前150仅满足该校排名项；逐校核验已列本科/硕士/博士，出现本人专科直接不通过，只认实际就读实体，不继承合作方/授予方排名。未匹配不等于已证实两榜均不达标。"}
 
 
 def main():
