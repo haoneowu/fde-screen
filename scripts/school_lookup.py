@@ -3,16 +3,22 @@
 
 Owner: APU Workshop
 Updated: 2026-10-11
-Change Log: 2026-10-11 Apply CN100/QS150 thresholds and neutral status names.
+Change Log: 2026-10-11 Add domestic outside-CN100 / QS-unmatched policy evidence.
 """
 import argparse
 import csv
+import hashlib
+import io
 import json
 import re
 import unicodedata
 from pathlib import Path
 
 REFERENCE = Path(__file__).resolve().parents[1] / "references"
+DATA_HASHES = {
+    "domestic": "5a29751540f8ed69a9742eb96dc97d6cddd30b7a0824f6fc9124643dcc4d0ee9",
+    "overseas": "1da69f0adbd32100390ec58ad30ccc525f28f970c84fca6b14feab050029158c",
+}
 
 
 def normalize(name):
@@ -37,15 +43,21 @@ def lookup(scope, school):
     cutoff = 100 if scope == "domestic" else 150
     base = {"cutoff": cutoff, "input": school, "scope": scope, "ranking_year": 2025,
             "source_file": str(path), "g1": "待核验", "ranking_status": "unmatched",
-            "note": "仅单榜证据；单榜超门槛不能判整体fail；还需检查其余就读学校。"}
+            "note": "仅单榜证据；国内须结合另一榜，海外实体已确认时按QS150；还需检查其余就读学校。"}
     if not normalize(school):
         base["reason"] = "学校名为空；不得通过。"
         return base
     if not path.exists():
         base.update(ranking_status="data_unavailable", reason="离线表缺失；不得通过或用其他年份替代。")
         return base
-    with path.open(encoding="utf-8-sig", newline="") as handle:
-        rows = list(csv.DictReader(handle))
+    try:
+        raw = path.read_bytes()
+        if hashlib.sha256(raw).hexdigest() != DATA_HASHES[scope]:
+            raise ValueError("离线表完整性校验失败")
+        rows = list(csv.DictReader(io.StringIO(raw.decode("utf-8-sig"))))
+    except (OSError, UnicodeError, ValueError, csv.Error):
+        base.update(ranking_status="data_unavailable", reason="离线表读取或完整性校验失败；待核验，不视为未命中。")
+        return base
     key = normalize(school)
     matches = [r for r in rows if key in {normalize(r.get("name", "")), normalize(r.get("name_en", ""))}]
     if len(matches) != 1:
@@ -61,7 +73,7 @@ def lookup(scope, school):
         base.update(ranking_status="within_cutoff", reason="2025本榜名次符合；不等于所有已列学历学校及无专科条件均通过。")
     elif low > cutoff:
         base.update(ranking_status="outside_cutoff",
-                    reason="本榜超过门槛；须检查另一榜，不能据此单独判G1不通过。")
+                    reason="本榜超过门槛；国内须结合另一榜，海外实体已确认时QS超过150可判排名项不通过。")
     else:
         base.update(ranking_status="rank_unresolved", reason="排名区间跨越本榜门槛；待核验，不自动通过。")
     return base
@@ -84,13 +96,19 @@ def lookup_either(school):
             result = matched[0] if matched else results[0]
         evidence.append(result)
     statuses = {r["ranking_status"] for r in evidence}
+    qs_country = evidence[1].get("match", {}).get("country", "")
+    overseas_outside = (evidence[1]["ranking_status"] == "outside_cutoff"
+                        and qs_country and qs_country != "China (Mainland)")
     status = ("ambiguous" if "ambiguous" in statuses else
               "within_cutoff" if "within_cutoff" in statuses else
-              "outside_both_cutoffs" if statuses == {"outside_cutoff"} else "pending_verification")
+              "outside_both_cutoffs" if statuses == {"outside_cutoff"} else
+              "overseas_outside_qs" if overseas_outside else
+              "domestic_outside_qs_unmatched" if evidence[0]["ranking_status"] == "outside_cutoff"
+              and evidence[1]["ranking_status"] == "unmatched" else "pending_verification")
     return {"input": school, "ranking_year": 2025, "ranking_status": status,
-            "g1": "不通过（确认实际就读实体匹配时）" if status == "outside_both_cutoffs" else "待核验",
+            "g1": "不通过（确认实际就读实体匹配时）" if status in {"outside_both_cutoffs", "domestic_outside_qs_unmatched", "overseas_outside_qs"} else "待核验",
             "evidence": evidence,
-            "note": "软科前100或QS前150仅满足该校排名项；逐校核验已列本科/硕士/博士，出现本人专科直接不通过，只认实际就读实体，不继承合作方/授予方排名。未匹配不等于已证实两榜均不达标。"}
+            "note": "国内软科超过100且QS150未命中按规则否；须确认实体明确、表正常读取。海外按QS150，不因缺软科而否。逐校核验已列学历、专科直接否。本工具只查校名，空输入不证明简历未写学校；须完整读取后由审阅者判定。"}
 
 
 def main():

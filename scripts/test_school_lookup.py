@@ -1,8 +1,10 @@
 """Owner: APU Workshop. Updated: 2026-10-11.
 Change Log: 2026-10-07 Add offline ranking boundary and identity regression tests.
+2026-10-11 Cover domestic QS absence and retain technical-failure pending states.
 """
 import csv
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 from school_lookup import REFERENCE, lookup, lookup_either, rank_bounds
 
@@ -66,7 +68,7 @@ class SchoolLookupTests(unittest.TestCase):
     def test_either_and_entity(self):
         for name in ["清华大学", "湖南师范大学", "University of Bath"]:
             self.assertEqual(lookup_either(name)["ranking_status"], "within_cutoff")
-        for name in ["宁波诺丁汉大学", "University of Nottingham Ningbo China", "厦门大学嘉庚学院", "南通大学", ""]:
+        for name in ["宁波诺丁汉大学", "University of Nottingham Ningbo China", "厦门大学嘉庚学院", ""]:
             self.assertEqual(lookup_either(name)["g1"], "待核验")
             self.assertNotEqual(lookup_either(name)["ranking_status"], "within_cutoff")
         self.assertEqual(lookup("domestic", "南通大学")["g1"], "待核验")
@@ -83,7 +85,11 @@ class SchoolLookupTests(unittest.TestCase):
             ("outside_cutoff", "within_cutoff", "within_cutoff"),
             ("within_cutoff", "outside_cutoff", "within_cutoff"),
             ("outside_cutoff", "outside_cutoff", "outside_both_cutoffs"),
-            ("outside_cutoff", "unmatched", "pending_verification"),
+            ("outside_cutoff", "unmatched", "domestic_outside_qs_unmatched"),
+            ("outside_cutoff", "data_unavailable", "pending_verification"),
+            ("outside_cutoff", "ambiguous", "ambiguous"),
+            ("outside_cutoff", "rank_unresolved", "pending_verification"),
+            ("unmatched", "within_cutoff", "within_cutoff"),
             ("unmatched", "unmatched", "pending_verification"),
             ("data_unavailable", "within_cutoff", "within_cutoff"),
         ]
@@ -94,8 +100,28 @@ class SchoolLookupTests(unittest.TestCase):
                 with patch("school_lookup.lookup", side_effect=fake):
                     result = lookup_either("Test institution")
                 self.assertEqual(result["ranking_status"], expected)
-                if expected != "outside_both_cutoffs":
+                if expected not in {"outside_both_cutoffs", "domestic_outside_qs_unmatched"}:
                     self.assertEqual(result["g1"], "待核验")
+
+    def test_domestic_qs_absence_policy(self):
+        result = lookup_either("南通大学")
+        self.assertEqual(result["ranking_status"], "domestic_outside_qs_unmatched")
+        self.assertTrue(result["g1"].startswith("不通过"))
+
+    def test_overseas_outside_qs(self):
+        result = lookup_either("Michigan State University")
+        self.assertEqual(result["ranking_status"], "overseas_outside_qs")
+        self.assertTrue(result["g1"].startswith("不通过"))
+
+    def test_broken_qs_is_not_absence(self):
+        original = Path.read_bytes
+        for broken in [b"", b"rank,name,country,source_id\n", b"broken"]:
+            def read(path):
+                return broken if path.name == "schools-2025-qs.csv" else original(path)
+            with patch.object(Path, "read_bytes", read):
+                result = lookup_either("南通大学")
+            self.assertEqual(result["ranking_status"], "pending_verification")
+            self.assertEqual(result["g1"], "待核验")
 
 
 if __name__ == "__main__":
